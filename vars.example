@@ -1,0 +1,3 @@
+export LOCAL_DIR=/path/to/a/local/directory
+export DESTINATION=user@somehost:/some/dir
+export LOG_FILE=/some/logs/dir/backup.log

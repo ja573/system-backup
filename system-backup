@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+
+usage() {
+G='\033[0;32m' # green
+O='\033[0;33m' # orange
+N='\033[0m' # none
+
+printf "
+${O}Usage:${N}
+  $0 [argument]
+
+${O}Arguments:${N}
+  ${G}backup${N}        Backup the whole system to a .tar.gz file.
+  ${G}archive${N}       Move the backup file to an archive location.
+  ${G}all${N}           Perform both backup, and archive actions.
+
+${O}Description:${N}
+  This script either generates a system wide backup and/or moves the resulting
+  backup file to a specified location. rsync is used to move the file, as the
+  original idea was to transfer the backup to a remote location.
+
+  Running this script with the backup argument should be done as root,
+  otherwise protected files will not be backed up.
+
+${O}Author:${N}
+  Written by Javier Arias on July 2017.
+"
+}
+
+set -eu
+
+cd $(realpath $(dirname $0))
+. vars
+
+if [ ! -n "$LOCAL_DIR" ] || [ ! -n "$LOG_FILE" ]; then
+    echo "You need to set the variables in vars"
+    exit 1
+fi
+
+LOG_FILE=/home/ja573/logs/backup.log
+LOCAL_DIR=/home/ja573/backups
+DESTINATION=ukfn@backup1-sov.mythic-beasts.com:~/.
+
+get_filename() {
+    local today=$(date +%Y-%m-%d)
+    local host=$(hostname)
+    echo ${LOCAL_DIR}/${host}-${today}.tar.gz
+}
+
+generate_socket_list() {
+    # https://serverfault.com/questions/525805/525812#525812
+    find / -type s -print 2> /dev/null
+}
+
+remove_leading_slash() {
+    local input=$1
+    sed 's/^\///g' $input
+}
+
+cleanup() {
+    local exit_value=$?
+    if [ $exit_value -ne 0 ]; then
+        rm -f $FILE
+        rm -f $LOG_FILE
+    fi
+}
+
+do_backup() {
+    local file=$1
+    local log=$2
+
+    generate_socket_list > /tmp/sockets
+    # we are backing up relative names - strip leading '/' from excluded files
+    remote_leading_slash /tmp/sockets > /tmp/sockets-to-exclude
+
+    tar -cpzf ${file} \
+        --directory='/' \
+        --exclude-from /tmp/sockets-to-exclude \
+        --exclude=${file#/} \
+        --exclude=${log#/} \
+        --exclude='proc' \
+        --exclude='tmp' \
+        --exclude='sys' \
+        --exclude='dev' \
+        --exclude='mnt' \
+        --exclude='dev' \
+        . > /dev/null 2> ${log}
+}
+
+archive_backup() {
+    local file=$1
+    local destination=$2
+    rsync -az --remove-source-files $file $destination > /dev/null
+}
+
+trap cleanup EXIT
+
+FILE=$(get_filename)
+
+case "$1" in
+    "backup")
+        do_backup $FILE $LOG_FILE
+        ;;
+    "archive")
+        archive_backup $FILE $DESTINATION
+        ;;
+    "all")
+        do_backup $FILE $LOG_FILE
+        archive_backup $FILE $DESTINATION
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac
